@@ -122,9 +122,9 @@ def plot_to_png(
         for _, row in shapes_gdf.iterrows():
             c = row["color"] if pd.notna(row["color"]) else "#000000"
             g = gpd.GeoSeries([row.geometry], crs=shapes_gdf.crs)
-            g.plot(ax=ax, linewidth=linewidth, zorder=2)
+            g.plot(ax=ax, linewidth=linewidth, zorder=2, antialiased=True)
     else:
-        shapes_gdf.plot(ax=ax, linewidth=linewidth, zorder=2)
+        shapes_gdf.plot(ax=ax, linewidth=linewidth, zorder=2, antialiased=True)
 
     # draw stops if available
     if stops_gdf is not None:
@@ -185,18 +185,49 @@ def filter_shapes_by_route(shapes_gdf, trips_df, route_ids):
     return filtered
 
 
+def filter_shapes_by_route_and_direction(
+    shapes_gdf, trips_df, route_ids, direction=None
+):
+    """
+    Filter shapes to export based on route_id list and optional direction.
+    """
+    if trips_df is None or route_ids is None:
+        return shapes_gdf
+    if isinstance(route_ids, str):
+        route_ids = [route_ids]
+    # Filter trips by route_id
+    trips_filtered = trips_df[trips_df["route_id"].isin(route_ids)]
+    # Filter by direction if specified
+    if direction is not None and "direction_id" in trips_filtered.columns:
+        trips_filtered = trips_filtered[trips_filtered["direction_id"] == direction]
+    # List of shape_ids to keep
+    shape_ids = trips_filtered["shape_id"].unique().tolist()
+    filtered = shapes_gdf[shapes_gdf["shape_id"].isin(shape_ids)]
+    return filtered
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--shapes", required=True, help="shapes.txt")
     p.add_argument("--routes", help="routes.txt (optional, for colors)")
     p.add_argument("--trips", help="trips.txt (optional, for route_id filtering)")
     p.add_argument("--stops", help="stops.txt (optional, to draw stops)")
+    p.add_argument(
+        "--direction",
+        type=int,
+        choices=[0, 1],
+        default=None,
+        help="Draw only this direction (0 or 1). Default: all directions",
+    )
     p.add_argument("--out", default="overlay.png", help="output PNG filename")
     p.add_argument("--dpi", type=int, default=150)
     p.add_argument("--linewidth", type=float, default=2.0)
     p.add_argument("--pad", type=float, default=0.02, help="bbox margin fraction")
     p.add_argument(
         "--scale", type=float, default=1.0, help="resolution scale (1=base, 2=HD)"
+    )
+    p.add_argument(
+        "--color", default="#ff0000", help="Line color in hex or name (default red)"
     )
     p.add_argument("--route_id", help="Filter a single route (e.g.: 42)")
     p.add_argument(
@@ -226,7 +257,9 @@ def main():
     if route_filter:
         if trips_df is None:
             raise SystemExit("Error: --trips required to filter by route_id")
-        shapes_gdf = filter_shapes_by_route(shapes_gdf, trips_df, route_filter)
+        shapes_gdf = filter_shapes_by_route_and_direction(
+            shapes_gdf, trips_df, route_filter, direction=args.direction
+        )
         print(
             f"Filter applied: {len(shapes_gdf)} shapes matching route_id={route_filter}"
         )
@@ -244,6 +277,7 @@ def main():
         linewidth=args.linewidth,
         bbox=bbox,
         scale=args.scale,
+        route_color_map=args.color,
     )
 
     # Create structure for Leaflet
